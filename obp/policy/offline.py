@@ -300,7 +300,7 @@ class NNPolicyLearner(BaseOfflinePolicyLearner):
         input_size = self.dim_context
 
         #new added
-        self.represent_model = nn.Linear(input_size, input_size)
+        self.represent_model = nn.Linear(self.dim_context, self.dim_context)
         layer_list.append(("represent", self.represent_model))
         
         for i, h in enumerate(self.hidden_layer_size):
@@ -308,14 +308,19 @@ class NNPolicyLearner(BaseOfflinePolicyLearner):
             layer_list.append(("a{}".format(i), activation_layer()))
             input_size = h
         layer_list.append(("output", nn.Linear(input_size, self.n_actions)))
-        layer_list.append(("softmax", nn.Softmax(dim=1)))
+        #layer_list.append(("softmax", nn.Softmax(dim=1)))
 
 
-        #layer_list_policy.append(self.represent_model)       
-        layer_list_policy.append(("policy",nn.Softmax(dim = self.n_actions)))
+        #layer_list_policy.append(("representation", self.represent_model))  
+        print(input_size)
+        print("!")  
+        layer_list_policy.append(("linear", nn.Linear(self.dim_context, self.n_actions)))
+        layer_list_policy.append(("policy",nn.Softmax(dim = 0)))
         self.policy_model = nn.Sequential(OrderedDict(layer_list_policy))
+        #self.policy_model produces a vector of dim n_actions representing the p for each action, sum of them should be 1
 
         self.nn_model = nn.Sequential(OrderedDict(layer_list))
+        #self.nn_model is f, produce a vector with dim n_actions representing the rewards for each of the actions
 
 
         if self.off_policy_objective != "ipw":
@@ -506,122 +511,68 @@ class NNPolicyLearner(BaseOfflinePolicyLearner):
                 "solver must be one of 'adam', 'adagrad', or 'sgd'"
             )
 
-        training_data_loader, validation_data_loader = self._create_train_data_for_opl(
-            context, action, reward, pscore, position
-        )
-
-        # start policy training
-        n_not_improving_training = 0
-        previous_training_loss = None
-        n_not_improving_validation = 0
-        previous_validation_loss = None
         for _ in tqdm(np.arange(self.max_iter), desc="policy learning"):
             self.nn_model.train()
-            for x, a, r, p, pos in training_data_loader:
-                #new added
-                print("reach")
-                optimizer.zero_grad()
-                action_dist_by_current_policy = self.nn_model(x).unsqueeze(-1)
-                policy_value_arr = self._estimate_policy_value(
-                    context=x,
-                    reward=r,
-                    action=a,
-                    pscore=p,
-                    action_dist=action_dist_by_current_policy,
-                    position=pos,
-                )
-                policy_constraint = self._estimate_policy_constraint(
-                    action=a,
-                    pscore=p,
-                    action_dist=action_dist_by_current_policy,
-                )
-                variance_constraint = torch.var(policy_value_arr)
-                negative_loss = policy_value_arr.mean()
-                negative_loss += self.policy_reg_param * policy_constraint
-                negative_loss -= self.var_reg_param * variance_constraint
-                loss = -negative_loss
-                loss.backward()
-                optimizer.step()
-
-                loss_value = loss.item()
-                if previous_training_loss is not None:
-                    if loss_value - previous_training_loss < self.tol:
-                        n_not_improving_training += 1
-                    else:
-                        n_not_improving_training = 0
-                if n_not_improving_training >= self.n_iter_no_change:
-                    break
-                previous_training_loss = loss_value
+            #new added
+            print("reach")
+            optimizer.zero_grad()
+            lossnew =  self.calculate_loss(context, action, reward, pscore, position)
+            loss = -lossnew 
+            loss.backward()
+            optimizer.step()
             
             #new added
             self.policy_model.train()
-            for x, a, r, p, pos in training_data_loader:
-                optimizer.zero_grad()
-                action_dist_by_current_policy = self.nn_model(x).unsqueeze(-1)
-                policy_value_arr = self._estimate_policy_value(
-                    context=x,
-                    reward=r,
-                    action=a,
-                    pscore=p,
-                    action_dist=action_dist_by_current_policy,
-                    position=pos,
-                )
-                policy_constraint = self._estimate_policy_constraint(
-                    action=a,
-                    pscore=p,
-                    action_dist=action_dist_by_current_policy,
-                )
-                variance_constraint = torch.var(policy_value_arr)
-                negative_loss = policy_value_arr.mean()
-                negative_loss += self.policy_reg_param * policy_constraint
-                negative_loss -= self.var_reg_param * variance_constraint
-                loss = -negative_loss
-                loss.backward()
-                optimizer.step()
+            optimizer.zero_grad()
+            lossnew =  self.calculate_loss(context, action, reward, pscore, position)
+            loss = lossnew 
+            loss.backward()
+            optimizer.step()
 
-                loss_value = loss.item()
-                if previous_training_loss is not None:
-                    if loss_value - previous_training_loss < self.tol:
-                        n_not_improving_training += 1
-                    else:
-                        n_not_improving_training = 0
-                if n_not_improving_training >= self.n_iter_no_change:
-                    break
-                previous_training_loss = loss_value
-            """
-            if self.early_stopping:
-                self.nn_model.eval()
-                for x, a, r, p, pos in validation_data_loader:
-                    action_dist_by_current_policy = self.nn_model(x).unsqueeze(-1)
-                    policy_value_arr = self._estimate_policy_value(
-                        context=x,
-                        reward=r,
-                        action=a,
-                        pscore=p,
-                        action_dist=action_dist_by_current_policy,
-                        position=pos,
-                    )
-                    policy_constraint = self._estimate_policy_constraint(
-                        action=a,
-                        pscore=p,
-                        action_dist=action_dist_by_current_policy,
-                    )
-                    variance_constraint = torch.var(policy_value_arr)
-                    negative_loss = policy_value_arr.mean()
-                    negative_loss += self.policy_reg_param * policy_constraint
-                    negative_loss -= self.var_reg_param * variance_constraint
-                    loss = -negative_loss
-                    loss_value = loss.item()
-                    if previous_validation_loss is not None:
-                        if loss_value - previous_validation_loss < self.tol:
-                            n_not_improving_validation += 1
-                        else:
-                            n_not_improving_validation = 0
-                    if n_not_improving_validation > self.n_iter_no_change:
-                        break
-                    previous_validation_loss = loss_value
-                """
 
+    def calculate_loss(
+        self,
+        context: np.ndarray,
+        action: np.ndarray,
+        reward: np.ndarray,
+        pscore: Optional[np.ndarray] = None,
+        position: Optional[np.ndarray] = None,
+    ):
+        #context = torch.from_numpy(context)
+        #what is P(x)?
+        #haven't include the representation
+        print("!!!")
+        print(context.shape)
+        print(action.shape)
+        print(reward.shape)
+        numsample = context.shape[0]
+        dim_action = self.n_actions
+        loss1 = 0
+        for i in range(0, numsample):
+            a = np.zeros(dim_action)
+            a[action[i]] = 1
+            b = self.policy_model(torch.from_numpy(context[i]).float()).detach().numpy()
+            loss1 += np.linalg.norm(a-b)
+
+        loss2 = 0
+        for i in range(0, numsample):
+            r1 = self.policy_model(torch.from_numpy(context[i]).float()).detach().numpy()
+            r2 = self.nn_model(torch.from_numpy(context[i]).float()).detach().numpy()
+            temp = np.dot(r1, r2)
+            loss2 += temp
+        
+        loss3 = 0
+        for i in range(0, numsample):
+            predict_r = (self.nn_model(torch.from_numpy(context[i]).float()).detach().numpy())[action[i]]
+            loss3 += (predict_r - reward[i])*(predict_r - reward[i])
+        loss3 /= numsample
+        return torch.scalar_tensor(loss1 + loss2 + loss3)
+
+
+
+
+
+  #should not use the code below
     def _estimate_policy_value(
         self,
         context: torch.Tensor,
