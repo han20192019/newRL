@@ -17,21 +17,5 @@ from obp.policy.offline_continuous import ContinuousNNPolicyLearner
 
 
 __all__ = [
-    "BaseContextFreePolicy",
-    "BaseContextualPolicy",
-    "BaseOfflinePolicyLearner",
-    "BaseContinuousOfflinePolicyLearner",
-    "EpsilonGreedy",
-    "Random",
-    "BernoulliTS",
-    "LinEpsilonGreedy",
-    "LinUCB",
-    "LinTS",
-    "LogisticEpsilonGreedy",
-    "LogisticUCB",
-    "LogisticTS",
-    "MiniBatchLogisticRegression",
-    "IPWLearner",
     "NNPolicyLearner",
-    "ContinuousNNPolicyLearner",
 ]
